@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BerryTube Mention Threads
 // @namespace    btcustomload
-// @version      0.2.0
+// @version      0.2.1
 // @homepageURL  https://github.com/flames5123/BT-mentions-threads
 // @supportURL   https://github.com/flames5123/BT-mentions-threads/issues
 // @updateURL    https://raw.githubusercontent.com/flames5123/BT-mentions-threads/main/MentionThreads.user.js
@@ -244,6 +244,40 @@
     return idx < 0 ? (msgs.length ? 0 : -1) : idx;
   }
 
+  // Visible region of the buffer BELOW our pinned bar.
+  function bufferVisibleBox(buffer) {
+    var br = buffer.getBoundingClientRect();
+    var barH = (bar && bar.style.display !== 'none') ? bar.offsetHeight : 0;
+    return { top: br.top + barH, bottom: br.bottom, height: br.height - barH };
+  }
+  // Drive the buffer's own scrollTop (reliable across vanilla/MalTweaks layouts;
+  // scrollIntoView can scroll the wrong ancestor / the page).
+  function scrollToTarget(buffer, target) {
+    var vb = bufferVisibleBox(buffer);
+    var tr = target.getBoundingClientRect();
+    var delta = (tr.top - vb.top) - Math.max(0, (vb.height - tr.height) / 2);
+    buffer.scrollTop += delta;
+  }
+  function targetVisible(buffer, target) {
+    var vb = bufferVisibleBox(buffer);
+    var tr = target.getBoundingClientRect();
+    return tr.top >= vb.top - 2 && tr.bottom <= vb.bottom + 2;
+  }
+  // BerryTube's scrollBuffersToBottom() force-scrolls the buffer to the bottom on
+  // EVERY incoming message. While a thread is open we re-pin the focused message
+  // so that auto-scroll can't yank it out of view.
+  function keepFocusPinned() {
+    if (!activeBuffer || !activeNick) return;
+    var msgs = messagesFor(activeBuffer, activeNick);
+    if (activeIdx < 0 || activeIdx >= msgs.length) return;
+    var target = msgs[activeIdx];
+    if (!target) return;
+    requestAnimationFrame(function () {
+      if (activeBuffer && target.isConnected && !targetVisible(activeBuffer, target))
+        scrollToTarget(activeBuffer, target);
+    });
+  }
+
   function clearFocus(buffer) {
     buffer.querySelectorAll('.msgwrap.mtn-focus').forEach(function (el) {
       el.classList.remove('mtn-focus');
@@ -284,9 +318,8 @@
     var target = msgs[activeIdx];
     target.classList.add('mtn-focus');
     if (activeColor) target.style.outlineColor = activeColor;
-    try { target.scrollIntoView({ block: 'center', inline: 'nearest' }); }
-    catch (e) { target.scrollIntoView(); }
     positionBar();
+    scrollToTarget(activeBuffer, target);
   }
 
   function step(delta) { activeIdx += delta; render(); }
@@ -351,6 +384,8 @@
           else if (node.querySelectorAll) node.querySelectorAll('.msgwrap').forEach(processMsgwrap);
         });
       });
+      // Counteract BerryTube's auto-scroll-to-bottom while a thread is open.
+      if (activeBuffer === buffer && activeNick) keepFocusPinned();
     }).observe(buffer, { childList: true });
   }
   function scan() {
@@ -361,5 +396,5 @@
 
   scan();
   setInterval(scan, 3000);
-  console.log('[MentionThreads] v0.2.0 loaded');
+  console.log('[MentionThreads] v0.2.1 loaded');
 })();
